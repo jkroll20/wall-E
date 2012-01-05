@@ -20,20 +20,6 @@ function hex(r,g,b)
     return string.format("%.2x%.2x%.2x",math.sqrt(r)*255,math.sqrt(g)*255,math.sqrt(b)*255)
 end
 
-function shuffle(t)
-  local n = #t
-
-  while n >= 2 do
-    -- n is now the last pertinent index
-    local k = math.random(n) -- 1 <= k <= n
-    -- Quick swap
-    t[n], t[k] = t[k], t[n]
-    n = n - 1
-  end
-
-  return t
-end
-
 function inbound(p, _min, _max)
     if _min == nil then _min = 0 end
     if _max == nil then _max = 1 end
@@ -108,8 +94,8 @@ function life(buf1, buf2)
     local h= wall.height
     
     local neighborcount= {}
-    
     local aliveTotal= 0
+    local stateChanges= 0
 
     for y= 0, h do
 	for x= 0, w do
@@ -130,65 +116,78 @@ function life(buf1, buf2)
 		
 -- Any live cell with fewer than two live neighbours dies, as if caused by under-population.
 		if neighbors<2 and alive~=0 then 
-		    buf2[y*w+x+1].alive= 0	--= { r=.5,g=0,b=0, alive=0 }
+		    alive= 0	--= { r=.5,g=0,b=0, alive=0 }
 		end
 -- Any live cell with two or three live neighbours lives on to the next generation.
 		if (neighbors==2 or neighbors==3) and alive~=0 then 
-		    buf2[y*w+x+1].alive= 1	--= { r=1,g=1,b=1, alive=1 }
+		    alive= 1	--= { r=1,g=1,b=1, alive=1 }
 		end
 -- Any live cell with more than three live neighbours dies, as if by overcrowding.
 		if neighbors>3 and alive~=0 then 
-		    buf2[y*w+x+1].alive= 0	--= { r=0,g=0,b=0, alive=0 }
+		    alive= 0	--= { r=0,g=0,b=0, alive=0 }
 		end
 -- Any dead cell with exactly three live neighbours becomes a live cell, as if by reproduction.
 		if neighbors==3 and alive==0 then 
-		    buf2[y*w+x+1]= { r=1,g=1,b=1, alive=1 }
+		    alive= 1    -- buf2[y*w+x+1]= { r=1,g=1,b=1, alive=1 }
 		end
-		
-		if buf2[y*w+x+1].alive==1 then aliveTotal= aliveTotal+1 end
+        
+        if(buf2[y*w+x+1].alive ~= alive) then stateChanges= stateChanges+1 end
+        buf2[y*w+x+1].alive= alive
+		if alive==1 then aliveTotal= aliveTotal+1 end
+        
 	end
     end
     
-    return aliveTotal
+    return aliveTotal,stateChanges
+end
+
+function colorize(pix1, pix2, factor)
+    -- todo make global?
+    local w= wall.width
+    local h= wall.height
+
+    for y= 0, h do
+        for x= 0, w do
+            local a= pix1[y*w+x+1].alive
+            local b= pix2[y*w+x+1].alive
+            for _,c in ipairs({"r","g","b"}) do 
+                pix2[y*w+x+1][c]= a + (b-a)*factor
+            end
+        end
+    end
 end
 
 lastAlive= 0
 curAlive= 0
 
-nextdrops= 0
+step=10
+
+nextrand= 0
+lastrand= 0
 function update()
     local w= wall.width
     local h= wall.height
 
-    -- blur(pix1, pix2, math.sin(tick*0.00649)*.1, math.cos(tick*.0127)*.1)
-    if tick%3==0 then 
-	lastAlive= curAlive
-	curAlive= life(pix1, pix2)
+    if tick%step==0 then 
+        lastAlive= curAlive
+        curAlive,stateChanges= life(pix1, pix2)
+    pix1,pix2= pix2,pix1
     end
 	--fade(pix2, .1)
---	blur(pix1, pix2, 0, 0)
-	fade(pix2, .1)
-	local p= pix1
-	pix1= pix2
-	pix2= p
+    colorize(pix2, pix1, (tick%step)/step)
 
     
     tick= tick+1
     
-    
-    if tick>nextdrops then
-        if math.abs(curAlive-lastAlive)<2 or tick>nextdrops+1000 then
-	    for i=1,R(1,15) do
-		local x= R(1, w)
-		local y= R(1, h)
-		for _, c in ipairs({"r", "g", "b"}) do
-			--print(pixels[y*w+x][c])
-			pix1[y*w+x][c]= inbound(pix1[y*w+x][c] + R(.5, .5), 0, 1.0)
-		end
-		pix1[y*w+x].alive= 1
-	    end
-	    nextdrops= tick+5	--R(tick+1, tick+1)
-	end
+    -- kill or create some cells if nothing happens
+    if stateChanges<2 or tick>nextrand then    --math.abs(curAlive-lastAlive)==0 
+        for i=1,5 do
+            local x= R(1, w)
+            local y= R(1, h)
+            pix1[y*w+x].alive= R(0,2) % 2
+        end
+        lastrand= tick
+        nextrand= tick+100
     end
 end
 
@@ -207,7 +206,7 @@ end
 --------------------------------------------------------------------------------
 
 function love.load()
-    wall = Wall("176.99.24.251", 1338, 2)
+    wall = Wall()   --"176.99.24.251", 1338, 2)
 
     __maxd = math.sqrt(wall.width*wall.height)
 
@@ -222,8 +221,8 @@ function love.load()
     
     for y= -1, h+1 do
 	for x= -1, w+1 do
-	    pix1[y*w+x+1]= { r=0, g=0, b=0 }
-	    pix2[y*w+x+1]= { r=0, g=0, b=0 }
+	    pix1[y*w+x+1]= { r=0, g=0, b=0, alive=0 }
+	    pix2[y*w+x+1]= { r=0, g=0, b=0, alive=0 }
 	end
     end
 end
